@@ -164,6 +164,73 @@ def safe_get(d, key, default=0):
     return d.get(key, default)
 
 
+import re
+
+def _extract_recommendations(text: str) -> list[dict]:
+    """Extract action items from Claude's analysis response.
+
+    Looks for bullet points and numbered items under priority headings
+    (Do Today, This Week, This Month, Next Quarter) and categorizes them.
+    """
+    items = []
+    current_priority = "this_week"  # default
+
+    # Priority heading patterns
+    priority_map = {
+        r"do\s+today|immediate|right\s+now|today": "immediate",
+        r"this\s+week|short.?term": "this_week",
+        r"this\s+month|medium.?term": "this_month",
+        r"next\s+quarter|long.?term|next\s+month": "next_quarter",
+    }
+
+    # Category keyword patterns
+    category_keywords = {
+        "ads": ["keyword", "ad copy", "campaign", "cpc", "quality score", "negative keyword", "bid", "google ads", "paid", "search term", "impression share"],
+        "seo": ["meta description", "title tag", "organic", "ranking", "position", "gsc", "search console", "serp", "backlink"],
+        "content": ["blog", "content", "article", "write", "publish", "topic", "page content"],
+        "landing_page": ["landing page", "bounce rate", "cro", "conversion rate", "cta", "hero", "form", "page speed"],
+    }
+
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        # Check if this line is a priority heading
+        lower = stripped.lower()
+        for pattern, priority in priority_map.items():
+            if re.search(pattern, lower) and len(stripped) < 80:
+                current_priority = priority
+                break
+
+        # Check if this is a bullet point or numbered item
+        bullet_match = re.match(r'^[\-\*\u2022]\s+\*{0,2}(.+?)\*{0,2}\s*$', stripped)
+        number_match = re.match(r'^\d+[\.\)]\s+\*{0,2}(.+?)\*{0,2}\s*$', stripped)
+
+        match = bullet_match or number_match
+        if match:
+            item_text = match.group(1).strip().strip("*").strip()
+            # Skip very short or heading-like items
+            if len(item_text) < 15 or item_text.endswith(":"):
+                continue
+            # Skip items that are just section headers
+            if any(re.search(p, item_text.lower()) for p in priority_map):
+                if len(item_text) < 40:
+                    continue
+
+            # Auto-detect category
+            item_lower = item_text.lower()
+            category = "general"
+            for cat, keywords in category_keywords.items():
+                if any(kw in item_lower for kw in keywords):
+                    category = cat
+                    break
+
+            items.append({"text": item_text, "category": category, "priority": current_priority})
+
+    return items
+
+
 # ── TABS ─────────────────────────────────────────────────────
 
 tab_overview, tab_gsc, tab_ga4, tab_ads, tab_pages, tab_trends, tab_actions = st.tabs(["Overview", "Search Console", "Analytics", "Google Ads", "Page Explorer", "Trends", "Action Log"])
@@ -602,8 +669,27 @@ with tab_actions:
     st.subheader("Action Log")
     st.caption("Track recommendations from Claude analyses. Add actions, mark as done, note outcomes. This history is included in future exports so Claude can build on prior analysis.")
 
-    # Add new recommendation
-    with st.expander("Add New Recommendation", expanded=False):
+    # Paste Claude's analysis to auto-extract recommendations
+    with st.expander("Paste Claude's Analysis (auto-extract)", expanded=False):
+        with st.form("paste_analysis", clear_on_submit=True):
+            analysis_text = st.text_area(
+                "Paste Claude's response here",
+                height=300,
+                placeholder="Paste the full Claude analysis response. Action items will be extracted automatically from bullet points and numbered lists.",
+            )
+            paste_submitted = st.form_submit_button("Extract & Add Recommendations", type="primary")
+            if paste_submitted and analysis_text.strip():
+                extracted = _extract_recommendations(analysis_text)
+                if extracted:
+                    for rec in extracted:
+                        add_recommendation(rec["text"], rec["category"], rec["priority"])
+                    st.success(f"Extracted and added **{len(extracted)}** recommendations!")
+                    st.rerun()
+                else:
+                    st.warning("Couldn't find action items. Try adding them manually below.")
+
+    # Add single recommendation manually
+    with st.expander("Add Manually", expanded=False):
         with st.form("add_rec", clear_on_submit=True):
             rec_text = st.text_area("Recommendation", placeholder="e.g., Add negative keyword 'freelancer billing' to Brand campaign")
             col1, col2 = st.columns(2)
