@@ -1,0 +1,21 @@
+# Credentials & secrets
+credentials.json
+google_ads_token.json
+client_secret_*.json
+.env
+
+# Database
+data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
