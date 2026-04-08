@@ -58,3 +58,7 @@ if _ads_token_env.startswith("{"):
 else:
     ADS_TOKEN = None
     ADS_TOKEN_FILE = _get("ADS_TOKEN_FILE", str(_project_root / "google_ads_token.json"))
+
+# ── Supabase ────────────────────────────────────────────────────
+SUPABASE_URL = _get("SUPABASE_URL")
+SUPABASE_KEY = _get("SUPABASE_KEY")

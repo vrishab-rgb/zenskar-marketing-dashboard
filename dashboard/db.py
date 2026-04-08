@@ -1,9 +1,16 @@
-"""SQLite storage for historical analytics data."""
+"""Storage layer — SQLite for data cache, Supabase for persistent recommendations."""
 
 import json
 import sqlite3
+import logging
 from datetime import datetime
 from pathlib import Path
+
+from dashboard import config
+
+logger = logging.getLogger(__name__)
+
+# ── SQLite (data pull cache) ────────────────────────────────
 
 DB_PATH = Path(__file__).parent.parent / "data" / "analytics.db"
 
@@ -72,65 +79,75 @@ def get_all_pull_dates() -> list[dict]:
     return [dict(r) for r in rows]
 
 
-# ── Recommendations Log ─────────────────────────────────────
+# ── Supabase REST API (persistent recommendations) ──────────
 
-def _init_recommendations():
-    conn = _connect()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS recommendations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            created_date TEXT NOT NULL,
-            recommendation TEXT NOT NULL,
-            category TEXT NOT NULL DEFAULT 'general',
-            priority TEXT NOT NULL DEFAULT 'this_week',
-            status TEXT NOT NULL DEFAULT 'pending',
-            outcome TEXT DEFAULT '',
-            updated_date TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
+def _sb_headers():
+    """Supabase REST API headers."""
+    return {
+        "apikey": config.SUPABASE_KEY,
+        "Authorization": f"Bearer {config.SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+
+
+def _sb_url(table: str) -> str:
+    return f"{config.SUPABASE_URL}/rest/v1/{table}"
+
+
+def _sb_ok() -> bool:
+    return bool(config.SUPABASE_URL and config.SUPABASE_KEY)
 
 
 def add_recommendation(recommendation: str, category: str = "general", priority: str = "this_week") -> int:
-    conn = _connect()
-    cur = conn.execute(
-        "INSERT INTO recommendations (created_date, recommendation, category, priority, status) VALUES (?, ?, ?, ?, 'pending')",
-        (datetime.now().isoformat()[:10], recommendation, category, priority),
-    )
-    conn.commit()
-    rec_id = cur.lastrowid
-    conn.close()
-    return rec_id
+    if not _sb_ok():
+        return -1
+    import httpx
+    resp = httpx.post(_sb_url("recommendations"), headers=_sb_headers(), json={
+        "created_date": datetime.now().isoformat()[:10],
+        "recommendation": recommendation,
+        "category": category,
+        "priority": priority,
+        "status": "pending",
+        "outcome": "",
+    })
+    if resp.status_code in (200, 201) and resp.json():
+        return resp.json()[0].get("id", -1)
+    return -1
 
 
 def update_recommendation(rec_id: int, status: str = None, outcome: str = None):
-    conn = _connect()
+    if not _sb_ok():
+        return
+    import httpx
+    updates = {"updated_date": datetime.now().isoformat()[:10]}
     if status:
-        conn.execute("UPDATE recommendations SET status=?, updated_date=? WHERE id=?", (status, datetime.now().isoformat()[:10], rec_id))
+        updates["status"] = status
     if outcome is not None:
-        conn.execute("UPDATE recommendations SET outcome=?, updated_date=? WHERE id=?", (outcome, datetime.now().isoformat()[:10], rec_id))
-    conn.commit()
-    conn.close()
+        updates["outcome"] = outcome
+    httpx.patch(f"{_sb_url('recommendations')}?id=eq.{rec_id}", headers=_sb_headers(), json=updates)
 
 
 def delete_recommendation(rec_id: int):
-    conn = _connect()
-    conn.execute("DELETE FROM recommendations WHERE id=?", (rec_id,))
-    conn.commit()
-    conn.close()
+    if not _sb_ok():
+        return
+    import httpx
+    httpx.delete(f"{_sb_url('recommendations')}?id=eq.{rec_id}", headers=_sb_headers())
 
 
 def get_recommendations(status: str = None) -> list[dict]:
-    conn = _connect()
+    if not _sb_ok():
+        return []
+    import httpx
+    url = _sb_url("recommendations")
+    params = {"order": "status.asc,created_date.desc"}
     if status:
-        rows = conn.execute("SELECT * FROM recommendations WHERE status=? ORDER BY created_date DESC", (status,)).fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM recommendations ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'done' THEN 1 ELSE 2 END, created_date DESC").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+        params["status"] = f"eq.{status}"
+    resp = httpx.get(url, headers=_sb_headers(), params=params)
+    if resp.status_code == 200:
+        return resp.json()
+    return []
 
 
 # Initialize on import
 init_db()
-_init_recommendations()
