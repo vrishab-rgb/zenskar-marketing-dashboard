@@ -65,8 +65,9 @@ def pull_gsc(start_date: date, end_date: date, force: bool = False, country: str
         totals, _ = get_latest_pull(source, "totals", gsc_start, gsc_end)
         queries, _ = get_latest_pull(source, "queries", gsc_start, gsc_end)
         pages, _ = get_latest_pull(source, "pages", gsc_start, gsc_end)
-        if totals and queries and pages:
-            return {"totals": totals, "queries": queries, "pages": pages, "gsc_start": str(gsc_start), "gsc_end": str(gsc_end)}
+        page_queries, _ = get_latest_pull(source, "page_queries", gsc_start, gsc_end)
+        if totals and queries and pages and page_queries:
+            return {"totals": totals, "queries": queries, "pages": pages, "page_queries": page_queries, "gsc_start": str(gsc_start), "gsc_end": str(gsc_end)}
 
     if country_filter:
         totals_rows = fetch_search_analytics(gsc_start, gsc_end, dimensions=["country"], dimension_filter_groups=country_filter)
@@ -86,7 +87,11 @@ def pull_gsc(start_date: date, end_date: date, force: bool = False, country: str
     store_pull(source, "queries", gsc_start, gsc_end, queries)
     store_pull(source, "pages", gsc_start, gsc_end, pages)
 
-    return {"totals": totals, "queries": queries, "pages": pages, "gsc_start": str(gsc_start), "gsc_end": str(gsc_end)}
+    # Query-page pairs (for page explorer)
+    page_queries = fetch_search_analytics(gsc_start, gsc_end, dimensions=["page", "query"], dimension_filter_groups=country_filter)
+    store_pull(source, "page_queries", gsc_start, gsc_end, page_queries)
+
+    return {"totals": totals, "queries": queries, "pages": pages, "page_queries": page_queries, "gsc_start": str(gsc_start), "gsc_end": str(gsc_end)}
 
 
 # ── GA4 ──────────────────────────────────────────────────────
@@ -299,6 +304,7 @@ def load_all(start_date: date, end_date: date, country: str = "US") -> dict | No
         return None
     gsc_queries, _ = get_latest_pull(gsc_source, "queries", gsc_start, gsc_end)
     gsc_pages, _ = get_latest_pull(gsc_source, "pages", gsc_start, gsc_end)
+    gsc_page_queries, _ = get_latest_pull(gsc_source, "page_queries", gsc_start, gsc_end)
 
     ga4_engagement, _ = get_latest_pull(ga4_source, "engagement", start_date, end_date)
     ga4_channels, _ = get_latest_pull(ga4_source, "channels", start_date, end_date)
@@ -312,7 +318,7 @@ def load_all(start_date: date, end_date: date, country: str = "US") -> dict | No
         return None
 
     return {
-        "gsc": {"totals": gsc_totals, "queries": gsc_queries, "pages": gsc_pages, "gsc_start": str(gsc_start), "gsc_end": str(gsc_end)},
+        "gsc": {"totals": gsc_totals, "queries": gsc_queries, "pages": gsc_pages, "page_queries": gsc_page_queries or [], "gsc_start": str(gsc_start), "gsc_end": str(gsc_end)},
         "ga4": {"engagement": ga4_engagement, "channels": ga4_channels, "landing_pages": ga4_landing_pages},
         "ads": {"campaigns": ads_campaigns, "keywords": ads_keywords, "search_terms": ads_search_terms},
         "country": country,

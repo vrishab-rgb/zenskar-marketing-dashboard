@@ -162,7 +162,7 @@ def safe_get(d, key, default=0):
 
 # ── TABS ─────────────────────────────────────────────────────
 
-tab_overview, tab_gsc, tab_ga4, tab_ads = st.tabs(["Overview", "Search Console", "Analytics", "Google Ads"])
+tab_overview, tab_gsc, tab_ga4, tab_ads, tab_pages = st.tabs(["Overview", "Search Console", "Analytics", "Google Ads", "Page Explorer"])
 
 gsc = data.get("gsc", {})
 ga4 = data.get("ga4", {})
@@ -426,3 +426,99 @@ with tab_ads:
             })
         if overlap_rows:
             st.dataframe(pd.DataFrame(overlap_rows), use_container_width=True, hide_index=True)
+
+
+# ── TAB 5: PAGE EXPLORER ───────────────────────────────────
+
+with tab_pages:
+    st.subheader("Page Explorer")
+    st.caption("Select a page to see all its metrics in one view — GSC search performance + GA4 engagement + top queries driving traffic.")
+
+    # Build page list from GSC pages data (sorted by clicks)
+    gsc_pages_list = sorted(gsc.get("pages", []), key=lambda x: x.get("clicks", 0), reverse=True)
+    ga4_lp_list = ga4.get("landing_pages", [])
+    page_queries_data = gsc.get("page_queries", [])
+    prev_gsc_pages = prev_gsc.get("pages", []) if prev_gsc else []
+    prev_ga4_lp = prev_ga4.get("landing_pages", []) if prev_ga4 else []
+
+    if not gsc_pages_list:
+        st.info("No page data available. Pull fresh data first.")
+    else:
+        # Dropdown with page paths
+        page_options = []
+        for p in gsc_pages_list:
+            path = p.get("page", "").replace("https://www.zenskar.com", "")
+            if path:
+                page_options.append(path)
+
+        selected_path = st.selectbox(
+            "Select a page",
+            page_options,
+            format_func=lambda x: f"{x}  ({next((p['clicks'] for p in gsc_pages_list if p.get('page', '').endswith(x)), 0)} clicks)",
+        )
+
+        if selected_path:
+            full_url = f"https://www.zenskar.com{selected_path}"
+
+            # Find GSC data for this page
+            page_gsc = next((p for p in gsc_pages_list if p.get("page") == full_url), {})
+            prev_page_gsc = next((p for p in prev_gsc_pages if p.get("page") == full_url), {})
+
+            # Find GA4 data — match on path
+            page_ga4 = next((lp for lp in ga4_lp_list if lp.get("landingPagePlusQueryString", "").rstrip("/") == selected_path.rstrip("/")), {})
+            prev_page_ga4 = next((lp for lp in prev_ga4_lp if lp.get("landingPagePlusQueryString", "").rstrip("/") == selected_path.rstrip("/")), {})
+
+            # ── GSC Metrics ──
+            st.divider()
+            st.subheader("Search Performance (GSC)")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Clicks", f"{page_gsc.get('clicks', 0):,}", delta_val(page_gsc.get('clicks', 0), prev_page_gsc.get('clicks')))
+            c2.metric("Impressions", f"{page_gsc.get('impressions', 0):,}", delta_val(page_gsc.get('impressions', 0), prev_page_gsc.get('impressions')))
+            c3.metric("CTR", fmt_pct(page_gsc.get('ctr', 0)))
+            c4.metric("Avg Position", f"{page_gsc.get('position', 0):.1f}")
+
+            # ── GA4 Metrics ──
+            st.divider()
+            st.subheader("Engagement (GA4)")
+            if page_ga4:
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Sessions", f"{page_ga4.get('sessions', 0):,}", delta_val(page_ga4.get('sessions', 0), prev_page_ga4.get('sessions')))
+                c2.metric("Users", f"{page_ga4.get('totalUsers', 0):,}", delta_val(page_ga4.get('totalUsers', 0), prev_page_ga4.get('totalUsers')))
+                c3.metric("Engagement Rate", fmt_pct(page_ga4.get('engagementRate', 0)))
+                c4.metric("Bounce Rate", fmt_pct(page_ga4.get('bounceRate', 0)))
+
+                c5, c6 = st.columns(2)
+                c5.metric("Key Events", f"{page_ga4.get('keyEvents', 0)}")
+                avg_dur = page_ga4.get('averageSessionDuration', 0)
+                if avg_dur:
+                    c6.metric("Avg Duration", fmt_dur(avg_dur))
+            else:
+                st.caption("No GA4 landing page data for this page in the selected period.")
+
+            # ── Top Queries for this Page ──
+            st.divider()
+            st.subheader("Top Queries Driving Traffic to This Page")
+            if page_queries_data:
+                queries_for_page = [pq for pq in page_queries_data if pq.get("page") == full_url]
+                queries_for_page.sort(key=lambda x: x.get("clicks", 0), reverse=True)
+
+                if queries_for_page:
+                    df_pq = pd.DataFrame(queries_for_page).head(25)
+                    df_pq["ctr"] = df_pq["ctr"].apply(lambda x: f"{x*100:.1f}%")
+                    df_pq["position"] = df_pq["position"].round(1)
+                    st.dataframe(df_pq[["query", "clicks", "impressions", "ctr", "position"]], use_container_width=True, hide_index=True)
+
+                    # Insights
+                    high_imp_low_ctr = [q for q in queries_for_page if q.get("impressions", 0) > 50 and q.get("ctr", 0) < 0.03]
+                    if high_imp_low_ctr:
+                        st.divider()
+                        st.subheader("Optimization Opportunities")
+                        st.caption("Queries with high impressions but low CTR (<3%) — potential title/meta description improvements:")
+                        df_opp = pd.DataFrame(high_imp_low_ctr).sort_values("impressions", ascending=False).head(10)
+                        df_opp["ctr"] = df_opp["ctr"].apply(lambda x: f"{x*100:.1f}%")
+                        df_opp["position"] = df_opp["position"].round(1)
+                        st.dataframe(df_opp[["query", "clicks", "impressions", "ctr", "position"]], use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No query-level data available for this page.")
+            else:
+                st.caption("Page query data not available. Pull fresh data to populate.")
