@@ -6,3 +6,4 @@ google-auth-oauthlib
 google-analytics-data
 google-ads
 python-dotenv
+httpx
