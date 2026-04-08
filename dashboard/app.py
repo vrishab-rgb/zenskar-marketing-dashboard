@@ -127,12 +127,15 @@ if export_clicked and data:
 
 if "export_md" in st.session_state:
     st.divider()
-    st.subheader("Export for Claude")
+    col_title, col_close = st.columns([0.8, 0.2])
+    with col_title:
+        st.subheader("Export for Claude")
+    with col_close:
+        if st.button("Back to Dashboard", type="primary"):
+            del st.session_state["export_md"]
+            st.rerun()
     st.text_area("Copy this and paste into Claude.ai:", st.session_state["export_md"], height=400)
     st.download_button("Download as .md", st.session_state["export_md"], file_name=f"zenskar_export_{start_date}_{end_date}.md", mime="text/markdown")
-    if st.button("Close export"):
-        del st.session_state["export_md"]
-        st.rerun()
     st.stop()
 
 # ── NO DATA STATE ────────────────────────────────────────────
