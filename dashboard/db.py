@@ -72,5 +72,65 @@ def get_all_pull_dates() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+# ── Recommendations Log ─────────────────────────────────────
+
+def _init_recommendations():
+    conn = _connect()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS recommendations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_date TEXT NOT NULL,
+            recommendation TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'general',
+            priority TEXT NOT NULL DEFAULT 'this_week',
+            status TEXT NOT NULL DEFAULT 'pending',
+            outcome TEXT DEFAULT '',
+            updated_date TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def add_recommendation(recommendation: str, category: str = "general", priority: str = "this_week") -> int:
+    conn = _connect()
+    cur = conn.execute(
+        "INSERT INTO recommendations (created_date, recommendation, category, priority, status) VALUES (?, ?, ?, ?, 'pending')",
+        (datetime.now().isoformat()[:10], recommendation, category, priority),
+    )
+    conn.commit()
+    rec_id = cur.lastrowid
+    conn.close()
+    return rec_id
+
+
+def update_recommendation(rec_id: int, status: str = None, outcome: str = None):
+    conn = _connect()
+    if status:
+        conn.execute("UPDATE recommendations SET status=?, updated_date=? WHERE id=?", (status, datetime.now().isoformat()[:10], rec_id))
+    if outcome is not None:
+        conn.execute("UPDATE recommendations SET outcome=?, updated_date=? WHERE id=?", (outcome, datetime.now().isoformat()[:10], rec_id))
+    conn.commit()
+    conn.close()
+
+
+def delete_recommendation(rec_id: int):
+    conn = _connect()
+    conn.execute("DELETE FROM recommendations WHERE id=?", (rec_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_recommendations(status: str = None) -> list[dict]:
+    conn = _connect()
+    if status:
+        rows = conn.execute("SELECT * FROM recommendations WHERE status=? ORDER BY created_date DESC", (status,)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM recommendations ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'done' THEN 1 ELSE 2 END, created_date DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 # Initialize on import
 init_db()
+_init_recommendations()

@@ -285,12 +285,61 @@ def pull_ads(start_date: date, end_date: date, force: bool = False) -> dict:
 # ── Combined ─────────────────────────────────────────────────
 
 def pull_all(start_date: date, end_date: date, force: bool = False, country: str = "US") -> dict:
-    return {
+    result = {
         "gsc": pull_gsc(start_date, end_date, force, country),
         "ga4": pull_ga4(start_date, end_date, force, country),
         "ads": pull_ads(start_date, end_date, force),
         "country": country,
     }
+    # Also pull daily trends (best-effort, don't block if it fails)
+    try:
+        pull_daily_trends(start_date, end_date, force, country)
+    except Exception:
+        pass
+    return result
+
+
+# ── Daily Trends ─────────────────────────────────────────────
+
+def pull_daily_trends(start_date: date, end_date: date, force: bool = False, country: str = "US") -> dict:
+    """Pull daily breakdowns for trend charts."""
+    gsc_start, gsc_end = _gsc_dates(start_date, end_date)
+    gsc_source = f"gsc_{country.lower()}"
+    ga4_source = f"ga4_{country.lower()}"
+
+    if not force:
+        gsc_daily, _ = get_latest_pull(gsc_source, "daily", gsc_start, gsc_end)
+        ga4_daily, _ = get_latest_pull(ga4_source, "daily", start_date, end_date)
+        if gsc_daily and ga4_daily:
+            return {"gsc_daily": gsc_daily, "ga4_daily": ga4_daily}
+
+    # GSC daily
+    country_filter = _gsc_country_filter(country)
+    gsc_daily = fetch_search_analytics(gsc_start, gsc_end, dimensions=["date"], dimension_filter_groups=country_filter)
+    store_pull(gsc_source, "daily", gsc_start, gsc_end, gsc_daily)
+
+    # GA4 daily
+    from google.analytics.data_v1beta.types import FilterExpression, Filter
+    ga4_country_name = GA4_COUNTRY_NAMES.get(country)
+    geo_filter = FilterExpression(
+        filter=Filter(
+            field_name="country",
+            string_filter=Filter.StringFilter(
+                match_type=Filter.StringFilter.MatchType.EXACT,
+                value=ga4_country_name,
+            ),
+        )
+    ) if ga4_country_name else None
+
+    ga4_daily = run_report(
+        start_date, end_date,
+        metrics=["sessions", "totalUsers", "newUsers", "engagementRate", "bounceRate"],
+        dimensions=["date"],
+        dimension_filter=geo_filter,
+    )
+    store_pull(ga4_source, "daily", start_date, end_date, ga4_daily)
+
+    return {"gsc_daily": gsc_daily, "ga4_daily": ga4_daily}
 
 
 def load_all(start_date: date, end_date: date, country: str = "US") -> dict | None:

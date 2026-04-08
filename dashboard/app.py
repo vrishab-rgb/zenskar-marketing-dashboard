@@ -20,9 +20,9 @@ for _k in _SECRET_KEYS:
 # Ensure project root is on path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from dashboard.pullers import pull_all, load_all
+from dashboard.pullers import pull_all, load_all, pull_daily_trends
 from dashboard.exporter import generate_export, fmt_pct, fmt_dur
-from dashboard.db import get_all_pull_dates
+from dashboard.db import get_all_pull_dates, add_recommendation, update_recommendation, delete_recommendation, get_recommendations
 
 st.set_page_config(page_title="Zenskar Marketing Analytics", page_icon="Z", layout="wide")
 
@@ -162,7 +162,7 @@ def safe_get(d, key, default=0):
 
 # ── TABS ─────────────────────────────────────────────────────
 
-tab_overview, tab_gsc, tab_ga4, tab_ads, tab_pages = st.tabs(["Overview", "Search Console", "Analytics", "Google Ads", "Page Explorer"])
+tab_overview, tab_gsc, tab_ga4, tab_ads, tab_pages, tab_trends, tab_actions = st.tabs(["Overview", "Search Console", "Analytics", "Google Ads", "Page Explorer", "Trends", "Action Log"])
 
 gsc = data.get("gsc", {})
 ga4 = data.get("ga4", {})
@@ -522,3 +522,140 @@ with tab_pages:
                     st.caption("No query-level data available for this page.")
             else:
                 st.caption("Page query data not available. Pull fresh data to populate.")
+
+
+# ── TAB 6: TRENDS ──────────────────────────────────────────
+
+with tab_trends:
+    st.subheader("Trends")
+    st.caption(f"Daily metrics for {start_date} to {end_date} ({country})")
+
+    # Load daily trend data
+    from dashboard.db import get_latest_pull as _get_pull
+    from dashboard.pullers import _gsc_dates
+    _gsc_s, _gsc_e = _gsc_dates(start_date, end_date)
+    _gsc_src = f"gsc_{country.lower()}"
+    _ga4_src = f"ga4_{country.lower()}"
+    gsc_daily, _ = _get_pull(_gsc_src, "daily", _gsc_s, _gsc_e)
+    ga4_daily, _ = _get_pull(_ga4_src, "daily", start_date, end_date)
+
+    if not gsc_daily and not ga4_daily:
+        st.info("No trend data available. Click **Pull Fresh Data** to fetch daily breakdowns.")
+    else:
+        # GSC daily trends
+        if gsc_daily:
+            st.subheader("Organic Search (GSC)")
+            df_gsc_d = pd.DataFrame(gsc_daily).sort_values("date")
+            df_gsc_d["date"] = pd.to_datetime(df_gsc_d["date"])
+            df_gsc_d = df_gsc_d.set_index("date")
+
+            c1, c2 = st.columns(2)
+            with c1:
+                st.caption("Clicks")
+                st.line_chart(df_gsc_d["clicks"])
+            with c2:
+                st.caption("Impressions")
+                st.line_chart(df_gsc_d["impressions"])
+
+            c3, c4 = st.columns(2)
+            with c3:
+                st.caption("CTR")
+                st.line_chart(df_gsc_d["ctr"])
+            with c4:
+                st.caption("Avg Position")
+                st.line_chart(df_gsc_d["position"])
+
+        st.divider()
+
+        # GA4 daily trends
+        if ga4_daily:
+            st.subheader("Site Engagement (GA4)")
+            df_ga4_d = pd.DataFrame(ga4_daily).sort_values("date")
+            # GA4 date format is YYYYMMDD
+            df_ga4_d["date"] = pd.to_datetime(df_ga4_d["date"], format="%Y%m%d")
+            df_ga4_d = df_ga4_d.set_index("date")
+
+            c1, c2 = st.columns(2)
+            with c1:
+                st.caption("Sessions")
+                st.line_chart(df_ga4_d["sessions"])
+            with c2:
+                st.caption("Users")
+                st.line_chart(df_ga4_d["totalUsers"])
+
+            c3, c4 = st.columns(2)
+            with c3:
+                st.caption("Engagement Rate")
+                st.line_chart(df_ga4_d["engagementRate"])
+            with c4:
+                st.caption("Bounce Rate")
+                st.line_chart(df_ga4_d["bounceRate"])
+
+
+# ── TAB 7: ACTION LOG ──────────────────────────────────────
+
+with tab_actions:
+    st.subheader("Action Log")
+    st.caption("Track recommendations from Claude analyses. Add actions, mark as done, note outcomes. This history is included in future exports so Claude can build on prior analysis.")
+
+    # Add new recommendation
+    with st.expander("Add New Recommendation", expanded=False):
+        with st.form("add_rec", clear_on_submit=True):
+            rec_text = st.text_area("Recommendation", placeholder="e.g., Add negative keyword 'freelancer billing' to Brand campaign")
+            col1, col2 = st.columns(2)
+            with col1:
+                rec_category = st.selectbox("Category", ["ads", "seo", "content", "landing_page", "general"])
+            with col2:
+                rec_priority = st.selectbox("Priority", ["immediate", "this_week", "this_month", "next_quarter"])
+            submitted = st.form_submit_button("Add", type="primary")
+            if submitted and rec_text.strip():
+                add_recommendation(rec_text.strip(), rec_category, rec_priority)
+                st.success("Added!")
+                st.rerun()
+
+    st.divider()
+
+    # Display recommendations
+    recs = get_recommendations()
+    if not recs:
+        st.info("No recommendations logged yet. Add one above, or paste recommendations from a Claude analysis.")
+    else:
+        # Summary counts
+        pending = [r for r in recs if r["status"] == "pending"]
+        done = [r for r in recs if r["status"] == "done"]
+        skipped = [r for r in recs if r["status"] == "skipped"]
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Pending", len(pending))
+        c2.metric("Done", len(done))
+        c3.metric("Skipped", len(skipped))
+
+        st.divider()
+
+        for rec in recs:
+            with st.container():
+                # Status indicator
+                status_icon = {"pending": "[ ]", "done": "[x]", "skipped": "[-]"}.get(rec["status"], "?")
+                priority_badge = {"immediate": "NOW", "this_week": "This Week", "this_month": "This Month", "next_quarter": "Next Qtr"}.get(rec["priority"], "")
+
+                col1, col2, col3, col4 = st.columns([0.5, 0.15, 0.15, 0.2])
+                with col1:
+                    st.markdown(f"**{status_icon} {rec['recommendation']}**")
+                    st.caption(f"{rec['category'].upper()} | {priority_badge} | Added: {rec['created_date'][:10]}")
+                    if rec.get("outcome"):
+                        st.caption(f"Outcome: {rec['outcome']}")
+                with col2:
+                    if rec["status"] != "done":
+                        if st.button("Done", key=f"done_{rec['id']}"):
+                            update_recommendation(rec["id"], status="done")
+                            st.rerun()
+                with col3:
+                    if rec["status"] == "pending":
+                        if st.button("Skip", key=f"skip_{rec['id']}"):
+                            update_recommendation(rec["id"], status="skipped")
+                            st.rerun()
+                with col4:
+                    outcome_text = st.text_input("Outcome", value=rec.get("outcome", ""), key=f"outcome_{rec['id']}", label_visibility="collapsed", placeholder="What happened?")
+                    if outcome_text != (rec.get("outcome") or ""):
+                        update_recommendation(rec["id"], outcome=outcome_text)
+
+                st.divider()

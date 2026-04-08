@@ -1,6 +1,7 @@
 """Generate markdown exports optimized for pasting into Claude.ai."""
 
 from datetime import date
+from dashboard.db import get_recommendations
 
 
 def fmt_pct(val):
@@ -181,6 +182,26 @@ def generate_export(data: dict, start_date: date, end_date: date, prev_data: dic
         org_pos = f"{org['position']:.1f}" if org else "N/A"
         w(f"| {kw['keyword']} | {kw['clicks']} | ${kw['cost']:,.2f} | {org_clicks} | {org_imp:,} | {org_pos} |")
     w("")
+
+    # ── RECOMMENDATIONS HISTORY ──
+    recs = get_recommendations()
+    if recs:
+        w("---")
+        w("## Prior Recommendations & Status")
+        w("")
+        w("These are actions from previous analyses. Reference them in your analysis — build on what worked, flag stalled items, and avoid re-recommending completed actions.")
+        w("")
+        w("| Date | Recommendation | Category | Priority | Status | Outcome |")
+        w("|------|---------------|----------|----------|--------|---------|")
+        for rec in recs:
+            outcome = rec.get("outcome", "") or ""
+            w(f"| {rec['created_date'][:10]} | {rec['recommendation']} | {rec['category']} | {rec['priority']} | **{rec['status'].upper()}** | {outcome} |")
+        w("")
+        pending_count = sum(1 for r in recs if r["status"] == "pending")
+        done_count = sum(1 for r in recs if r["status"] == "done")
+        if pending_count:
+            w(f"*{pending_count} actions still pending. {done_count} completed.*")
+            w("")
 
     # ── PROMPT ──
     w("---")
