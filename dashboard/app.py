@@ -7,6 +7,16 @@ from datetime import date, timedelta
 import streamlit as st
 import pandas as pd
 
+# Load Streamlit secrets into env vars (for Streamlit Cloud deployment)
+_SECRET_KEYS = ["GOOGLE_SERVICE_ACCOUNT_JSON", "GA4_PROPERTY_ID", "GSC_SITE_URL",
+                "ADS_CUSTOMER_ID", "ADS_DEV_TOKEN", "ADS_TOKEN_JSON"]
+for _k in _SECRET_KEYS:
+    if _k not in os.environ:
+        try:
+            os.environ[_k] = st.secrets[_k]
+        except (KeyError, FileNotFoundError):
+            pass
+
 # Ensure project root is on path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
