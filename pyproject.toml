@@ -1,0 +1,25 @@
+[project]
+name = "zenskar-mcp-server"
+version = "0.1.0"
+description = "MCP server for Zenskar marketing analytics (GSC, GA4, Google Ads, HubSpot, Bing)"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp[cli]>=1.0.0",
+    "google-api-python-client>=2.0",
+    "google-auth>=2.0",
+    "google-analytics-data>=0.18",
+    "google-ads>=25.0",
+    "requests>=2.28",
+    "python-dotenv>=1.0",
+    "protobuf>=4.0",
+]
+
+[project.scripts]
+zenskar-mcp = "mcp_server.server:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["mcp_server*"]

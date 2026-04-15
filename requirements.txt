@@ -7,3 +7,7 @@ google-analytics-data
 google-ads
 python-dotenv
 httpx
+mcp[cli]>=1.0.0
+requests>=2.28
+protobuf>=4.0
+uvicorn>=0.30

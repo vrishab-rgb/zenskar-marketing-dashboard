@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "zenskar-marketing": {
+      "command": "python",
+      "args": ["-m", "mcp_server.server"],
+      "cwd": "D:\\Projects\\Zenskar Demo Analysis"
+    }
+  }
+}
